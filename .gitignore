@@ -1,0 +1,72 @@
+# Frappe Bench .gitignore
+
+# Site-specific data (contains databases, passwords, etc.)
+sites/*/private/*
+sites/*/public/files/*
+sites/*/logs/*
+sites/*/task-logs/*
+sites/*/locks/*
+sites/*/backups/*
+sites/*/*.json.bak
+sites/*/site_config.json
+sites/currentsite.txt
+
+# Database dumps
+*.sql
+*.sql.gz
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+.eggs/
+
+# Node modules
+node_modules/
+**/node_modules/
+yarn-error.log
+npm-debug.log*
+
+# Assets (built files)
+sites/assets/*
+
+# Config files with sensitive data
+config/*
+
+# Archived sites
+archived/
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Redis
+*.rdb
+
+# Temp files
+*.tmp
+tmp/

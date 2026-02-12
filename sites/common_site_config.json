@@ -1,0 +1,22 @@
+{
+ "background_workers": 1,
+ "db_host": "127.0.0.1",
+ "db_port": 1905,
+ "default_site": "localhost",
+ "file_watcher_port": 6787,
+ "frappe_user": "apple",
+ "gunicorn_workers": 21,
+ "live_reload": true,
+ "rebase_on_pull": false,
+ "redis_cache": "redis://127.0.0.1:13000",
+ "redis_queue": "redis://127.0.0.1:11000",
+ "redis_socketio": "redis://127.0.0.1:13000",
+ "restart_supervisor_on_update": false,
+ "restart_systemd_on_update": false,
+ "root_password": "11235813",
+ "serve_default_site": true,
+ "shallow_clone": true,
+ "socketio_port": 9000,
+ "use_redis_auth": false,
+ "webserver_port": 8000
+}
