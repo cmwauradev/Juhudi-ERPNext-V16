@@ -19,6 +19,24 @@ const config = {
     apiSecret: process.env.ERPNEXT_API_SECRET || 'YOUR_API_SECRET'
 };
 
+// ============================================================================
+// DEBUG: Environment Detection & Target Configuration
+// ============================================================================
+console.log('\n' + '='.repeat(70));
+console.log('🔍 DEBUG: Environment Detection & Configuration');
+console.log('='.repeat(70));
+console.log('\n📋 Environment Variables:');
+console.log(`  NODE_ENV: ${process.env.NODE_ENV || 'not set'}`);
+console.log(`  ERPNEXT_URL: ${process.env.ERPNEXT_URL || 'not set (using default)'}`);
+console.log(`  ERPNEXT_API_KEY: ${process.env.ERPNEXT_API_KEY ? 'set (' + process.env.ERPNEXT_API_KEY.substring(0, 10) + '...)' : 'not set (using default)'}`);
+console.log(`  ERPNEXT_API_SECRET: ${process.env.ERPNEXT_API_SECRET ? 'set (' + process.env.ERPNEXT_API_SECRET.substring(0, 10) + '...)' : 'not set (using default)'}`);
+console.log('\n🎯 Detected Target Configuration:');
+console.log(`  Target URL: ${config.baseUrl}`);
+console.log(`  Using API Key: ${config.apiKey.substring(0, 15)}...`);
+console.log(`  Using API Secret: ${config.apiSecret.substring(0, 15)}...`);
+console.log(`  Source: ${process.env.ERPNEXT_URL ? 'Environment Variable' : 'Default Fallback'}`);
+console.log('='.repeat(70) + '\n');
+
 // Create axios instance
 const erpnextAPI = axios.create({
     baseURL: config.baseUrl,

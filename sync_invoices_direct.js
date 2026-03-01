@@ -27,6 +27,39 @@ const erpnextAPI = axios.create({
     }
 });
 
+// ============================================================================
+// DEBUG: Environment Detection & Target Configuration
+// ============================================================================
+function logEnvironmentConfig() {
+    console.log('\n' + '='.repeat(70));
+    console.log('🔍 DEBUG: Environment Detection & Configuration');
+    console.log('='.repeat(70));
+    console.log('\n📋 Environment Variables:');
+    console.log(`  NODE_ENV: ${process.env.NODE_ENV || 'not set'}`);
+    console.log('\n  MSSQL Source:');
+    console.log(`    MSSQL_SERVER: ${process.env.MSSQL_SERVER || 'not set'}`);
+    console.log(`    MSSQL_PORT: ${process.env.MSSQL_PORT || 'not set (default: 1433)'}`);
+    console.log(`    MSSQL_DATABASE: ${process.env.MSSQL_DATABASE || 'not set'}`);
+    console.log(`    MSSQL_USER: ${process.env.MSSQL_USER || 'not set'}`);
+    console.log(`    MSSQL_PASSWORD: ${process.env.MSSQL_PASSWORD ? 'set (hidden)' : 'not set'}`);
+    console.log('\n  ERPNext Target:');
+    console.log(`    ERPNEXT_URL: ${process.env.ERPNEXT_URL || 'not set'}`);
+    console.log(`    ERPNEXT_API_KEY: ${process.env.ERPNEXT_API_KEY ? 'set (' + process.env.ERPNEXT_API_KEY.substring(0, 10) + '...)' : 'not set'}`);
+    console.log(`    ERPNEXT_API_SECRET: ${process.env.ERPNEXT_API_SECRET ? 'set (' + process.env.ERPNEXT_API_SECRET.substring(0, 10) + '...)' : 'not set'}`);
+    console.log('\n🎯 Detected Target Configuration:');
+    console.log('  MSSQL Source:');
+    console.log(`    Server: ${mssqlConfig.server}`);
+    console.log(`    Port: ${mssqlConfig.port}`);
+    console.log(`    Database: ${mssqlConfig.database}`);
+    console.log(`    User: ${mssqlConfig.user}`);
+    console.log(`    Encrypt: ${mssqlConfig.options.encrypt}`);
+    console.log('  ERPNext Target:');
+    console.log(`    URL: ${process.env.ERPNEXT_URL}`);
+    console.log(`    Company: Juhudi Smart Solutions (hardcoded)`);
+    console.log(`    Auth: ${process.env.ERPNEXT_API_KEY ? 'Configured' : 'Missing'}`);
+    console.log('='.repeat(70) + '\n');
+}
+
 // Cache for customer mapping
 const customerCache = new Map();
 
@@ -111,9 +144,13 @@ async function syncInvoice(mssqlInvoice) {
 
 async function syncAllInvoices() {
     const startTime = new Date();
-    console.log('\n' + '='.repeat(70));
+    
+    // Log environment configuration
+    logEnvironmentConfig();
+    
+    console.log('\\n' + '='.repeat(70));
     console.log(`💰 Syncing MSSQL Invoices → ERPNext: ${startTime.toISOString()}`);
-    console.log('='.repeat(70) + '\n');
+    console.log('='.repeat(70) + '\\n');
     
     let pool;
     let stats = {

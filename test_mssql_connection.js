@@ -22,6 +22,31 @@ const config = {
     }
 };
 
+// ============================================================================
+// DEBUG: Environment Detection & Target Configuration
+// ============================================================================
+console.log('\n' + '='.repeat(70));
+console.log('🔍 DEBUG: Environment Detection & Configuration');
+console.log('='.repeat(70));
+console.log('\n📋 Environment Variables:');
+console.log(`  NODE_ENV: ${process.env.NODE_ENV || 'not set'}`);
+console.log(`  MSSQL_SERVER: ${process.env.MSSQL_SERVER || 'not set'}`);
+console.log(`  MSSQL_PORT: ${process.env.MSSQL_PORT || 'not set (using default: 1433)'}`);
+console.log(`  MSSQL_DATABASE: ${process.env.MSSQL_DATABASE || 'not set'}`);
+console.log(`  MSSQL_USER: ${process.env.MSSQL_USER || 'not set'}`);
+console.log(`  MSSQL_PASSWORD: ${process.env.MSSQL_PASSWORD ? 'set (hidden)' : 'not set'}`);
+console.log(`  MSSQL_ENCRYPT: ${process.env.MSSQL_ENCRYPT || 'not set (using default: false)'}`);
+console.log(`  MSSQL_TRUST_SERVER_CERTIFICATE: ${process.env.MSSQL_TRUST_SERVER_CERTIFICATE || 'not set (using default: false)'}`);
+console.log('\n🎯 Detected Target Configuration:');
+console.log(`  Target Server: ${config.server}`);
+console.log(`  Target Port: ${config.port}`);
+console.log(`  Target Database: ${config.database}`);
+console.log(`  Connection User: ${config.user}`);
+console.log(`  Encryption Enabled: ${config.options.encrypt}`);
+console.log(`  Trust Server Certificate: ${config.options.trustServerCertificate}`);
+console.log(`  Source: ${process.env.MSSQL_SERVER ? 'Environment Variables' : 'Not Configured'}`);
+console.log('='.repeat(70) + '\n');
+
 async function testConnection() {
     console.log('\n🔌 Testing MSSQL Connection...\n');
     console.log('Configuration:');
