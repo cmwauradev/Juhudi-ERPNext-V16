@@ -1,0 +1,608 @@
+/**
+ * MSSQL to ERPNext Complete Sync
+ * Maps ALL fields from MSSQL Customers table to ERPNext
+ * 
+ * MSSQL Fields: CustomerId, CountryId, Name, IDNO, Address, PCode, Town, PIN, Landline, Mobile, Email, Date
+ */
+
+const sql = require('mssql');
+const axios = require('axios');
+const cron = require('node-cron');
+require('dotenv').config();
+
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const mssqlConfig = {
+    server: process.env.MSSQL_SERVER,
+    port: parseInt(process.env.MSSQL_PORT || '1433'),
+    database: process.env.MSSQL_DATABASE,
+    user: process.env.MSSQL_USER,
+    password: process.env.MSSQL_PASSWORD,
+    options: {
+        encrypt: process.env.MSSQL_ENCRYPT === 'true',
+        trustServerCertificate: process.env.MSSQL_TRUST_SERVER_CERTIFICATE === 'true',
+        enableArithAbort: true
+    }
+};
+
+const erpnextConfig = {
+    baseURL: process.env.ERPNEXT_URL || 'http://localhost:8000',
+    headers: {
+        'Authorization': `token ${process.env.ERPNEXT_API_KEY}:${process.env.ERPNEXT_API_SECRET}`,
+        'Content-Type': 'application/json'
+    }
+};
+
+const erpnextAPI = axios.create(erpnextConfig);
+
+// ============================================================================
+// CUSTOM FIELDS SETUP
+// ============================================================================
+
+/**
+ * Create custom fields in Customer DocType to store all MSSQL data
+ */
+async function ensureCustomerCustomFields() {
+    const customFields = [
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_customer_id',
+            label: 'MSSQL Customer ID',
+            fieldtype: 'Data',
+            insert_after: 'customer_name',
+            read_only: 1
+        },
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_country_id',
+            label: 'Country ID',
+            fieldtype: 'Data',
+            insert_after: 'mssql_customer_id'
+        },
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_id_number',
+            label: 'ID Number (IDNO)',
+            fieldtype: 'Data',
+            insert_after: 'mssql_country_id'
+        },
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_address',
+            label: 'Address',
+            fieldtype: 'Data',
+            insert_after: 'mssql_id_number'
+        },
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_postal_code',
+            label: 'Postal Code (PCode)',
+            fieldtype: 'Data',
+            insert_after: 'mssql_address'
+        },
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_town',
+            label: 'Town',
+            fieldtype: 'Data',
+            insert_after: 'mssql_postal_code'
+        },
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_pin',
+            label: 'PIN Number',
+            fieldtype: 'Data',
+            insert_after: 'mssql_town'
+        },
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_landline',
+            label: 'Landline',
+            fieldtype: 'Data',
+            insert_after: 'mobile_no'
+        },
+        {
+            dt: 'Customer',
+            fieldname: 'mssql_registration_date',
+            label: 'Registration Date',
+            fieldtype: 'Date',
+            insert_after: 'mssql_landline'
+        }
+    ];
+
+    console.log('📋 Ensuring custom fields in Customer DocType...');
+    
+    for (const field of customFields) {
+        try {
+            // Check if field already exists
+            const fieldName = `Customer-${field.fieldname}`;
+            try {
+                await erpnextAPI.get(`/api/resource/Custom Field/${fieldName}`);
+                console.log(`  ✓ Field exists: ${field.fieldname}`);
+            } catch (error) {
+                if (error.response?.status === 404) {
+                    // Create the field
+                    await erpnextAPI.post('/api/resource/Custom Field', {
+                        ...field,
+                        doctype: 'Custom Field'
+                    });
+                    console.log(`  ✅ Created field: ${field.fieldname}`);
+                }
+            }
+        } catch (error) {
+            console.log(`  ⚠️  Field ${field.fieldname}:`, error.response?.data?.message || error.message);
+        }
+    }
+    
+    console.log('✅ Custom fields ready\n');
+}
+
+// ============================================================================
+// SYNC TRACKING
+// ============================================================================
+
+async function ensureSyncTrackingTable() {
+    try {
+        await erpnextAPI.get('/api/resource/DocType/MSSQL Sync Log');
+        console.log('✅ MSSQL Sync Log table exists');
+        return true;
+    } catch (error) {
+        if (error.response?.status === 404) {
+            console.log('📋 Creating MSSQL Sync Log table...');
+            await createSyncTrackingTable();
+            return true;
+        }
+        throw error;
+    }
+}
+
+async function createSyncTrackingTable() {
+    const docTypeData = {
+        doctype: 'DocType',
+        name: 'MSSQL Sync Log',
+        module: 'Custom',
+        custom: 1,
+        is_submittable: 0,
+        track_changes: 1,
+        autoname: 'format:SYNC-{#####}',
+        fields: [
+            { fieldname: 'source_table', label: 'Source Table', fieldtype: 'Data', reqd: 1 },
+            { fieldname: 'source_id', label: 'Source Record ID', fieldtype: 'Data', reqd: 1 },
+            { fieldname: 'target_doctype', label: 'Target DocType', fieldtype: 'Data', reqd: 1 },
+            { fieldname: 'target_id', label: 'Target Record ID', fieldtype: 'Data', reqd: 1 },
+            { fieldname: 'sync_status', label: 'Sync Status', fieldtype: 'Select', options: 'Success\nFailed\nPending', default: 'Success' },
+            { fieldname: 'sync_timestamp', label: 'Sync Timestamp', fieldtype: 'Datetime', default: 'Now' },
+            { fieldname: 'source_data', label: 'Source Data (JSON)', fieldtype: 'Long Text' },
+            { fieldname: 'error_message', label: 'Error Message', fieldtype: 'Long Text' }
+        ]
+    };
+
+    try {
+        await erpnextAPI.post('/api/resource/DocType', docTypeData);
+        console.log('✅ MSSQL Sync Log table created');
+    } catch (error) {
+        console.error('❌ Error creating sync table:', error.response?.data || error.message);
+    }
+}
+
+async function isRecordSynced(sourceTable, sourceId) {
+    try {
+        const filters = JSON.stringify([
+            ['source_table', '=', sourceTable],
+            ['source_id', '=', sourceId.toString()],
+            ['sync_status', '=', 'Success']
+        ]);
+        
+        const response = await erpnextAPI.get(
+            `/api/resource/MSSQL Sync Log?filters=${encodeURIComponent(filters)}&limit_page_length=1`
+        );
+        
+        return response.data.data.length > 0;
+    } catch (error) {
+        return false;
+    }
+}
+
+async function logSyncRecord(sourceTable, sourceId, targetDoctype, targetId, sourceData, status = 'Success', errorMessage = null) {
+    try {
+        const logData = {
+            source_table: sourceTable,
+            source_id: sourceId.toString(),
+            target_doctype: targetDoctype,
+            target_id: targetId,
+            sync_status: status,
+            sync_timestamp: new Date().toISOString(),
+            source_data: JSON.stringify(sourceData),
+            error_message: errorMessage
+        };
+
+        await erpnextAPI.post('/api/resource/MSSQL Sync Log', logData);
+    } catch (error) {
+        // Silently fail logging to not disrupt sync
+    }
+}
+
+// ============================================================================
+// MSSQL DATA FETCHING
+// ============================================================================
+
+async function connectMSSQL() {
+    try {
+        const pool = await sql.connect(mssqlConfig);
+        console.log('✅ Connected to MSSQL:', mssqlConfig.database);
+        return pool;
+    } catch (error) {
+        console.error('❌ MSSQL connection failed:', error.message);
+        throw error;
+    }
+}
+
+/**
+ * Fetch ALL customers with ALL fields from MSSQL
+ */
+async function fetchAllCustomersFromMSSQL(pool) {
+    try {
+        const result = await pool.request().query(`
+            SELECT 
+                CustomerId,
+                CountryId,
+                Name,
+                IDNO,
+                Address,
+                PCode,
+                Town,
+                PIN,
+                Landline,
+                Mobile,
+                Email,
+                Date
+            FROM Customers
+            ORDER BY CustomerId
+        `);
+        
+        console.log(`📊 Fetched ${result.recordset.length} customers from MSSQL`);
+        return result.recordset;
+    } catch (error) {
+        console.error('❌ Error fetching customers:', error.message);
+        return [];
+    }
+}
+
+/**
+ * Fetch invoices from MSSQL
+ */
+async function fetchAllInvoicesFromMSSQL(pool) {
+    try {
+        const result = await pool.request().query(`
+            SELECT 
+                InvoiceId,
+                CustomerId,
+                ConnectionId,
+                RefNo,
+                date,
+                Amount,
+                Paid,
+                Type,
+                amountPaid,
+                Balance
+            FROM Invoices
+            ORDER BY InvoiceId
+        `);
+        
+        console.log(`📊 Fetched ${result.recordset.length} invoices from MSSQL`);
+        return result.recordset;
+    } catch (error) {
+        console.error('❌ Error fetching invoices:', error.message);
+        return [];
+    }
+}
+
+// ============================================================================
+// DATA TRANSFORMATION - COMPLETE FIELD MAPPING
+// ============================================================================
+
+/**
+ * Transform MSSQL customer to ERPNext format - ALL FIELDS
+ */
+function transformCustomerDataComplete(mssqlCustomer) {
+    // Clean and prepare data
+    const cleanValue = (val) => val && val !== 'NULL' && String(val).trim() !== '' ? val : null;
+    
+    return {
+        // Standard ERPNext fields
+        customer_name: cleanValue(mssqlCustomer.Name) || `Customer ${mssqlCustomer.CustomerId}`,
+        customer_type: 'Individual',
+        customer_group: 'Commercial',
+        territory: 'Kenya',
+        
+        // Contact information
+        email_id: cleanValue(mssqlCustomer.Email),
+        mobile_no: cleanValue(mssqlCustomer.Mobile),
+        
+        // Custom fields - ALL MSSQL data
+        mssql_customer_id: mssqlCustomer.CustomerId.toString(),
+        mssql_country_id: cleanValue(mssqlCustomer.CountryId),
+        mssql_id_number: cleanValue(mssqlCustomer.IDNO),
+        mssql_address: cleanValue(mssqlCustomer.Address),
+        mssql_postal_code: cleanValue(mssqlCustomer.PCode),
+        mssql_town: cleanValue(mssqlCustomer.Town),
+        mssql_pin: cleanValue(mssqlCustomer.PIN),
+        mssql_landline: cleanValue(mssqlCustomer.Landline),
+        mssql_registration_date: mssqlCustomer.Date ? new Date(mssqlCustomer.Date).toISOString().split('T')[0] : null
+    };
+}
+
+/**
+ * Transform MSSQL invoice to ERPNext format
+ */
+function transformInvoiceDataComplete(mssqlInvoice, erpnextCustomerId) {
+    const today = new Date().toISOString().split('T')[0];
+    const invoiceDate = mssqlInvoice.date ? new Date(mssqlInvoice.date).toISOString().split('T')[0] : today;
+    const dueDate = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    
+    return {
+        customer: erpnextCustomerId,
+        company: process.env.ERPNEXT_COMPANY || 'Juhudi Smart Solutions',
+        posting_date: invoiceDate,
+        due_date: dueDate,
+        currency: 'KES',
+        po_no: mssqlInvoice.RefNo || null,
+        
+        items: [
+            {
+                item_code: 'WATER-SERVICE',
+                item_name: mssqlInvoice.Type || 'Water Service',
+                qty: 1,
+                rate: mssqlInvoice.Amount || 0,
+                description: `${mssqlInvoice.Type || 'Invoice'} - Connection: ${mssqlInvoice.ConnectionId || 'N/A'}\nRef: ${mssqlInvoice.RefNo || 'N/A'}\nPaid: ${mssqlInvoice.Paid ? 'Yes' : 'No'}\nAmount Paid: ${mssqlInvoice.amountPaid || 0}\nBalance: ${mssqlInvoice.Balance || 0}`
+            }
+        ],
+        
+        remarks: `MSSQL Invoice ID: ${mssqlInvoice.InvoiceId}\nConnection ID: ${mssqlInvoice.ConnectionId || 'N/A'}\nPaid: ${mssqlInvoice.Paid ? 'Yes' : 'No'}\nAmount Paid: ${mssqlInvoice.amountPaid || 0} KES\nBalance: ${mssqlInvoice.Balance || 0} KES`
+    };
+}
+
+// ============================================================================
+// SYNC OPERATIONS
+// ============================================================================
+
+async function syncCustomer(mssqlCustomer) {
+    const sourceTable = 'Customers';
+    const sourceId = mssqlCustomer.CustomerId;
+    
+    try {
+        if (await isRecordSynced(sourceTable, sourceId)) {
+            return null;
+        }
+        
+        const customerData = transformCustomerDataComplete(mssqlCustomer);
+        
+        const response = await erpnextAPI.post('/api/resource/Customer', customerData);
+        const erpnextCustomer = response.data.data;
+        
+        console.log(`  ✅ ${sourceId}: ${mssqlCustomer.Name || 'Unknown'} → ${erpnextCustomer.name}`);
+        
+        await logSyncRecord(sourceTable, sourceId, 'Customer', erpnextCustomer.name, mssqlCustomer);
+        
+        return erpnextCustomer;
+        
+    } catch (error) {
+        const errMsg = error.response?.data?.message || error.message;
+        if (!errMsg.includes('Duplicate') && !errMsg.includes('already exists')) {
+            console.error(`  ❌ ${sourceId}: ${errMsg}`);
+        }
+        
+        await logSyncRecord(sourceTable, sourceId, 'Customer', 'N/A', mssqlCustomer, 'Failed', errMsg);
+        
+        return null;
+    }
+}
+
+async function findERPNextCustomerByMSSQLId(mssqlCustomerId) {
+    try {
+        const filters = JSON.stringify([
+            ['source_table', '=', 'Customers'],
+            ['source_id', '=', mssqlCustomerId.toString()],
+            ['sync_status', '=', 'Success']
+        ]);
+        
+        const response = await erpnextAPI.get(
+            `/api/resource/MSSQL Sync Log?filters=${encodeURIComponent(filters)}&limit_page_length=1`
+        );
+        
+        if (response.data.data.length > 0) {
+            return response.data.data[0].target_id;
+        }
+        
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function syncInvoice(mssqlInvoice) {
+    const sourceTable = 'Invoices';
+    const sourceId = mssqlInvoice.InvoiceId;
+    
+    try {
+        if (await isRecordSynced(sourceTable, sourceId)) {
+            return null;
+        }
+        
+        const erpnextCustomerId = await findERPNextCustomerByMSSQLId(mssqlInvoice.CustomerId);
+        
+        if (!erpnextCustomerId) {
+            return null;
+        }
+        
+        const invoiceData = transformInvoiceDataComplete(mssqlInvoice, erpnextCustomerId);
+        
+        const response = await erpnextAPI.post('/api/resource/Sales Invoice', invoiceData);
+        const erpnextInvoice = response.data.data;
+        
+        console.log(`  ✅ Invoice ${sourceId} (${mssqlInvoice.Amount} KES) → ${erpnextInvoice.name}`);
+        
+        await logSyncRecord(sourceTable, sourceId, 'Sales Invoice', erpnextInvoice.name, mssqlInvoice);
+        
+        return erpnextInvoice;
+        
+    } catch (error) {
+        const errMsg = error.response?.data?.message || error.message;
+        await logSyncRecord(sourceTable, sourceId, 'Sales Invoice', 'N/A', mssqlInvoice, 'Failed', errMsg);
+        
+        return null;
+    }
+}
+
+// ============================================================================
+// MAIN SYNC PROCESS
+// ============================================================================
+
+async function runCompleteSync() {
+    const startTime = new Date();
+    console.log('\n' + '='.repeat(70));
+    console.log(`🔄 COMPLETE MSSQL → ERPNext Sync: ${startTime.toISOString()}`);
+    console.log('='.repeat(70) + '\n');
+    
+    let pool;
+    let stats = {
+        customersProcessed: 0,
+        customersSynced: 0,
+        customersSkipped: 0,
+        customersFailed: 0,
+        invoicesProcessed: 0,
+        invoicesSynced: 0,
+        invoicesSkipped: 0,
+        invoicesFailed: 0
+    };
+    
+    try {
+        // Setup
+        await ensureSyncTrackingTable();
+        await ensureCustomerCustomFields();
+        
+        pool = await connectMSSQL();
+        
+        // SYNC CUSTOMERS - ALL FIELDS
+        console.log('\n📋 Syncing ALL Customers with ALL Fields...\n');
+        const customers = await fetchAllCustomersFromMSSQL(pool);
+        
+        for (const customer of customers) {
+            stats.customersProcessed++;
+            const result = await syncCustomer(customer);
+            
+            if (result) {
+                stats.customersSynced++;
+            } else if (await isRecordSynced('Customers', customer.CustomerId)) {
+                stats.customersSkipped++;
+            } else {
+                stats.customersFailed++;
+            }
+            
+            // Progress indicator every 50 customers
+            if (stats.customersProcessed % 50 === 0) {
+                console.log(`  📊 Progress: ${stats.customersProcessed}/${customers.length} customers processed`);
+            }
+        }
+        
+        // SYNC INVOICES
+        console.log('\n💰 Syncing ALL Invoices...\n');
+        const invoices = await fetchAllInvoicesFromMSSQL(pool);
+        
+        for (const invoice of invoices) {
+            stats.invoicesProcessed++;
+            const result = await syncInvoice(invoice);
+            
+            if (result) {
+                stats.invoicesSynced++;
+            } else if (await isRecordSynced('Invoices', invoice.InvoiceId)) {
+                stats.invoicesSkipped++;
+            } else {
+                stats.invoicesFailed++;
+            }
+            
+            // Progress indicator every 100 invoices
+            if (stats.invoicesProcessed % 100 === 0) {
+                console.log(`  📊 Progress: ${stats.invoicesProcessed}/${invoices.length} invoices processed`);
+            }
+        }
+        
+    } catch (error) {
+        console.error('\n❌ Sync error:', error.message);
+    } finally {
+        if (pool) {
+            await pool.close();
+            console.log('\n✅ MSSQL connection closed');
+        }
+    }
+    
+    const endTime = new Date();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    
+    console.log('\n' + '='.repeat(70));
+    console.log('📊 COMPLETE SYNC SUMMARY');
+    console.log('='.repeat(70));
+    console.log(`Started:  ${startTime.toISOString()}`);
+    console.log(`Finished: ${endTime.toISOString()}`);
+    console.log(`Duration: ${duration} seconds`);
+    console.log('\nCustomers (All Fields Synced):');
+    console.log(`  Processed: ${stats.customersProcessed}`);
+    console.log(`  Synced:    ${stats.customersSynced}`);
+    console.log(`  Skipped:   ${stats.customersSkipped}`);
+    console.log(`  Failed:    ${stats.customersFailed}`);
+    console.log('\nInvoices:');
+    console.log(`  Processed: ${stats.invoicesProcessed}`);
+    console.log(`  Synced:    ${stats.invoicesSynced}`);
+    console.log(`  Skipped:   ${stats.invoicesSkipped}`);
+    console.log(`  Failed:    ${stats.invoicesFailed}`);
+    console.log('='.repeat(70) + '\n');
+}
+
+// ============================================================================
+// SCHEDULER
+// ============================================================================
+
+function startScheduledCompleteSync() {
+    console.log('🕐 Starting Complete MSSQL → ERPNext Sync Service...');
+    console.log('⏰ Sync runs every 5 minutes\n');
+    
+    // Run immediately
+    runCompleteSync();
+    
+    // Schedule every 5 minutes
+    cron.schedule('*/5 * * * *', () => {
+        runCompleteSync();
+    });
+    
+    console.log('✅ Scheduler started');
+    console.log('Press Ctrl+C to stop\n');
+}
+
+// ============================================================================
+// ENTRY POINT
+// ============================================================================
+
+if (require.main === module) {
+    const requiredVars = [
+        'MSSQL_SERVER',
+        'MSSQL_DATABASE',
+        'MSSQL_USER',
+        'MSSQL_PASSWORD',
+        'ERPNEXT_URL',
+        'ERPNEXT_API_KEY',
+        'ERPNEXT_API_SECRET'
+    ];
+    
+    const missingVars = requiredVars.filter(v => !process.env[v]);
+    
+    if (missingVars.length > 0) {
+        console.error('❌ Missing environment variables:', missingVars.join(', '));
+        process.exit(1);
+    }
+    
+    startScheduledCompleteSync();
+}
+
+module.exports = { runCompleteSync, syncCustomer, syncInvoice };

@@ -1,0 +1,30 @@
+{
+  "name": "erpnext-nodejs-integration",
+  "version": "1.0.0",
+  "description": "Node.js integration script for ERPNext - Insert customers, invoices, bills, and support tickets",
+  "main": "erpnext_integration.js",
+  "scripts": {
+    "start": "node erpnext_integration.js",
+    "test": "node test_connection.js",
+    "test:mssql": "node test_mssql_connection.js",
+    "sync": "node mssql_to_erpnext_sync.js",
+    "create-invoice": "node create_invoice_example.js"
+  },
+  "keywords": [
+    "erpnext",
+    "frappe",
+    "api",
+    "integration",
+    "nodejs"
+  ],
+  "author": "Your Company",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.13.6",
+    "mssql": "^12.2.0",
+    "node-cron": "^4.2.1"
+  },
+  "devDependencies": {
+    "dotenv": "^16.6.1"
+  }
+}
